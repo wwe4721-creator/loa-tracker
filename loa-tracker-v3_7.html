@@ -118,6 +118,23 @@
   #acDropdown .ac-empty{padding:8px 12px;font-size:12.5px;color:var(--dim)}
   #acDropdown[hidden]{display:none}
 
+  /* 탭 */
+  .tabs{display:flex;gap:8px;margin-bottom:18px}
+  .tab-btn{background:transparent;border:1px solid var(--line);color:var(--dim);padding:8px 16px;font-weight:600}
+  .tab-btn.active{background:var(--panel2);color:var(--gold);border-color:var(--gold-dim)}
+  .tab-panel[hidden]{display:none}
+
+  /* 캐릭터 정보 탭 */
+  .section-title{color:var(--gold);font-size:13px;font-weight:700;margin:18px 0 8px;letter-spacing:.02em}
+  .grade-일반{color:var(--ink)}
+  .grade-고급{color:#6bcf6b}
+  .grade-희귀{color:#5391e0}
+  .grade-영웅{color:#b070e0}
+  .grade-전설{color:#e0a83a}
+  .grade-유물{color:#e0615f}
+  .grade-고대{color:var(--gold)}
+  .grade-에스더{color:#4fd6c8}
+
   @media (max-width:900px){
     body{font-size:13px}
     .summary{grid-template-columns:repeat(2,1fr)}
@@ -132,6 +149,12 @@
   <h1>로스트아크 자산 트래커</h1>
   <p class="sub">기준 시점 대비 현재 시세로 자산 변동과 손해 비중을 계산합니다.</p>
 
+  <div class="tabs">
+    <button class="tab-btn active" data-tab-btn="asset">자산</button>
+    <button class="tab-btn" data-tab-btn="character">캐릭터 정보</button>
+  </div>
+
+  <div class="tab-panel" data-tab="asset">
   <div class="summary">
     <div class="card"><div class="label">기준 총자산</div><div class="value gold" id="totalBase">0</div></div>
     <div class="card"><div class="label">현재 총자산</div><div class="value gold" id="totalNow">0</div></div>
@@ -210,6 +233,47 @@
     <div class="card"><div class="label">손해 금액</div><div class="value down" id="worstAmount">-</div></div>
     <div class="card"><div class="label">하락율</div><div class="value down" id="worstRate">-</div></div>
     <div class="card"><div class="label">전체 손해 합계</div><div class="value down" id="worstTotalLoss">-</div></div>
+  </div>
+  </div>
+
+  <div class="tab-panel" data-tab="character" hidden>
+  <div class="panel">
+    <div class="toolbar">
+      <div class="ac-wrap" style="width:240px">
+        <input type="text" id="charNameInput" class="name" placeholder="캐릭터명 입력 (예: 수원산펀치)" autocomplete="off">
+      </div>
+      <button id="charSearchBtn" class="primary">검색</button>
+      <span class="hint">원정대 아무 캐릭터 이름이나 입력하면 됩니다</span>
+    </div>
+    <div id="charStatusLog"></div>
+
+    <div id="charResult" hidden>
+      <div class="summary" style="margin-top:16px">
+        <div class="card"><div class="label">서버 / 직업</div><div class="value" id="charServerClass">-</div></div>
+        <div class="card"><div class="label">아이템 레벨</div><div class="value gold" id="charItemLevel">-</div></div>
+        <div class="card"><div class="label">전투력</div><div class="value" id="charCombatPower">-</div></div>
+        <div class="card"><div class="label">길드</div><div class="value" id="charGuild">-</div></div>
+      </div>
+
+      <div class="section-title">장비</div>
+      <table>
+        <thead><tr><th style="width:90px">부위</th><th>이름</th><th style="width:90px">등급</th></tr></thead>
+        <tbody id="charEquipRows"></tbody>
+      </table>
+
+      <div class="section-title">각인 (아크 패시브)</div>
+      <table>
+        <thead><tr><th>이름</th><th style="width:90px">등급</th><th style="width:70px">레벨</th></tr></thead>
+        <tbody id="charEngraveRows"></tbody>
+      </table>
+
+      <div class="section-title">원정대 (부캐)</div>
+      <table>
+        <thead><tr><th style="width:110px">서버</th><th>캐릭터명</th><th style="width:110px">직업</th><th style="width:70px">레벨</th><th style="width:110px">아이템 레벨</th></tr></thead>
+        <tbody id="charSiblingRows"></tbody>
+      </table>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -657,6 +721,87 @@
     }
   });
   window.addEventListener("scroll", ()=>{ if(acActiveInput) acHide(); }, true);
+
+  /* ---------- 탭 전환 ---------- */
+  document.querySelectorAll(".tab-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const tab = btn.dataset.tabBtn;
+      document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active", b===btn));
+      document.querySelectorAll(".tab-panel").forEach(p=>{ p.hidden = p.dataset.tab !== tab; });
+    });
+  });
+
+  /* ---------- 캐릭터 정보 ---------- */
+  const GRADE_CLASS = {
+    "일반":"grade-일반","고급":"grade-고급","희귀":"grade-희귀","영웅":"grade-영웅",
+    "전설":"grade-전설","유물":"grade-유물","고대":"grade-고대","에스더":"grade-에스더"
+  };
+
+  function setCharStatus(msg, kind){
+    const el = document.getElementById("charStatusLog");
+    el.textContent = msg;
+    el.className = kind || "";
+  }
+  function stripTags(s){
+    return String(s ?? "").replace(/<[^>]*>/g,"").trim();
+  }
+
+  async function searchCharacter(){
+    const nameInput = document.getElementById("charNameInput");
+    const name = nameInput.value.trim();
+    if(!name){ setCharStatus("캐릭터명을 입력하세요.", "err"); return; }
+    const btn = document.getElementById("charSearchBtn");
+    btn.disabled = true;
+    document.getElementById("charResult").hidden = true;
+    setCharStatus("조회 중…");
+    try{
+      const [armory, siblings] = await Promise.all([
+        apiPost("/armories/characters/"+name, {}),
+        apiPost("/characters/"+name+"/siblings", {}).catch(()=>[])
+      ]);
+      if(!armory || !armory.ArmoryProfile){
+        setCharStatus("캐릭터를 찾을 수 없습니다: "+name, "err");
+        return;
+      }
+      renderCharacter(armory, siblings || []);
+      document.getElementById("charResult").hidden = false;
+      setCharStatus(`조회 완료 (${new Date().toLocaleString("ko-KR")})`, "ok");
+    }catch(e){
+      setCharStatus("조회 실패: "+e.message, "err");
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  function renderCharacter(armory, siblings){
+    const p = armory.ArmoryProfile;
+    document.getElementById("charServerClass").textContent = `${p.ServerName} · ${p.CharacterClassName}`;
+    document.getElementById("charItemLevel").textContent = p.ItemAvgLevel || "-";
+    document.getElementById("charCombatPower").textContent = p.CombatPower || "-";
+    document.getElementById("charGuild").textContent = p.GuildName || "-";
+
+    const equip = armory.ArmoryEquipment || [];
+    document.getElementById("charEquipRows").innerHTML = equip.map(it=>{
+      const gradeCls = GRADE_CLASS[it.Grade] || "";
+      return `<tr><td>${escapeHtml(it.Type)}</td><td style="text-align:left">${escapeHtml(stripTags(it.Name))}</td><td class="${gradeCls}">${escapeHtml(it.Grade||"-")}</td></tr>`;
+    }).join("") || `<tr><td colspan="3">장비 정보 없음</td></tr>`;
+
+    const effects = (armory.ArmoryEngraving && armory.ArmoryEngraving.ArkPassiveEffects) || [];
+    document.getElementById("charEngraveRows").innerHTML = effects.map(ef=>{
+      const gradeCls = GRADE_CLASS[ef.Grade] || "";
+      return `<tr><td style="text-align:left">${escapeHtml(ef.Name)}</td><td class="${gradeCls}">${escapeHtml(ef.Grade||"-")}</td><td>Lv.${ef.Level ?? "-"}</td></tr>`;
+    }).join("") || `<tr><td colspan="3">각인 정보 없음</td></tr>`;
+
+    const sorted = [...siblings].sort((a,b)=> parseNum(b.ItemAvgLevel) - parseNum(a.ItemAvgLevel));
+    document.getElementById("charSiblingRows").innerHTML = sorted.map(s=>
+      `<tr><td>${escapeHtml(s.ServerName)}</td><td style="text-align:left">${escapeHtml(s.CharacterName)}</td><td>${escapeHtml(s.CharacterClassName)}</td><td>${escapeHtml(String(s.CharacterLevel))}</td><td>${escapeHtml(s.ItemAvgLevel)}</td></tr>`
+    ).join("") || `<tr><td colspan="5">원정대 정보 없음</td></tr>`;
+  }
+
+  document.getElementById("charSearchBtn").addEventListener("click", searchCharacter);
+  document.getElementById("charNameInput").addEventListener("keydown", e=>{
+    if(e.key === "Enter") searchCharacter();
+  });
 
   renderAssets();
   fetchAllPrices(); // 페이지를 열면 버튼을 안 눌러도 현재 시점 가격을 자동으로 최신화

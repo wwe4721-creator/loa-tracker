@@ -248,11 +248,14 @@
     <div id="charStatusLog"></div>
 
     <div id="charResult" hidden>
-      <div class="summary" style="margin-top:16px">
-        <div class="card"><div class="label">서버 / 직업</div><div class="value" id="charServerClass">-</div></div>
-        <div class="card"><div class="label">아이템 레벨</div><div class="value gold" id="charItemLevel">-</div></div>
-        <div class="card"><div class="label">전투력</div><div class="value" id="charCombatPower">-</div></div>
-        <div class="card"><div class="label">길드</div><div class="value" id="charGuild">-</div></div>
+      <div style="display:flex;gap:16px;align-items:flex-start;margin-top:16px">
+        <img id="charImage" hidden alt="캐릭터 이미지" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0">
+        <div class="summary" style="margin-top:0;flex:1">
+          <div class="card"><div class="label">서버 / 직업</div><div class="value" id="charServerClass">-</div></div>
+          <div class="card"><div class="label">아이템 레벨</div><div class="value gold" id="charItemLevel">-</div></div>
+          <div class="card"><div class="label">전투력</div><div class="value" id="charCombatPower">-</div></div>
+          <div class="card"><div class="label">길드</div><div class="value" id="charGuild">-</div></div>
+        </div>
       </div>
 
       <div class="section-title">장비</div>
@@ -261,10 +264,26 @@
         <tbody id="charEquipRows"></tbody>
       </table>
 
+      <div class="section-title">팔찌 효과</div>
+      <div id="charBraceletInfo" style="color:var(--ink);font-size:12.5px;line-height:1.8"></div>
+
+      <div class="section-title">보석</div>
+      <table>
+        <thead><tr><th style="width:60px">슬롯</th><th>이름</th><th style="width:90px">등급</th><th style="width:60px">레벨</th></tr></thead>
+        <tbody id="charGemRows"></tbody>
+      </table>
+      <div id="charGemSummary" style="color:var(--dim);font-size:12px;margin-top:6px"></div>
+
       <div class="section-title">각인 (아크 패시브)</div>
       <table>
         <thead><tr><th>이름</th><th style="width:90px">등급</th><th style="width:70px">레벨</th></tr></thead>
         <tbody id="charEngraveRows"></tbody>
+      </table>
+
+      <div class="section-title">아크 그리드</div>
+      <table>
+        <thead><tr><th>효과</th><th style="width:70px">레벨</th><th>내용</th></tr></thead>
+        <tbody id="charArkGridRows"></tbody>
       </table>
 
       <div class="section-title">원정대 (부캐)</div>
@@ -289,7 +308,7 @@
   // type: material·book(거래소, 전체 카테고리 이름 검색) | gem(경매장 보석 210000)
   const DEFAULT_ITEMS = [
     {name:"파괴석",               query:"운명의 파괴석",           type:"material", bq:"64",    bp:"5.12"},
-    {name:"운명의 파괴석 결정",   query:"운명의 파괴석 결정",       type:"material", bq:"1176",  bp:"16.6"},
+    {name:"운명의 파괴석 결정",   query:"운명의 파괴석 결정",       type:"material", bq:"117600",  bp:"16.6"},
     {name:"상급 아비도스 융화 재료", query:"상급 아비도스 융화 재료", type:"material", bq:"15410", bp:"162"},
     {name:"위대한 운명의 돌파석", query:"위대한 운명의 돌파석",     type:"material", bq:"3452",  bp:"17"},
     {name:"용숨",                 query:"용암의 숨결",             type:"material", bq:"318",   bp:"302"},
@@ -745,6 +764,29 @@
   function stripTags(s){
     return String(s ?? "").replace(/<[^>]*>/g,"").trim();
   }
+  function htmlToLines(html){
+    if(!html) return [];
+    return String(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .split("\n")
+      .map(s=>s.trim())
+      .filter(Boolean);
+  }
+  // 장비 Tooltip은 JSON 문자열이고, 그 안의 ItemPartBox 항목 중 라벨(예: "팔찌 효과")이
+  // 포함된 항목의 값을 찾아 꺼내는 용도 — 팔찌 같은 특수 효과 텍스트를 파싱할 때 사용
+  function findTooltipSection(tooltipStr, labelKeyword){
+    if(!tooltipStr) return null;
+    let tt;
+    try{ tt = JSON.parse(tooltipStr); }catch(e){ return null; }
+    for(const key in tt){
+      const el = tt[key];
+      if(el && el.type === "ItemPartBox" && el.value && typeof el.value.Element_000 === "string" && el.value.Element_000.includes(labelKeyword)){
+        return el.value.Element_001;
+      }
+    }
+    return null;
+  }
 
   async function searchCharacter(){
     const nameInput = document.getElementById("charNameInput");
@@ -780,17 +822,48 @@
     document.getElementById("charCombatPower").textContent = p.CombatPower || "-";
     document.getElementById("charGuild").textContent = p.GuildName || "-";
 
+    const imgEl = document.getElementById("charImage");
+    if(p.CharacterImage){ imgEl.src = p.CharacterImage; imgEl.hidden = false; }
+    else{ imgEl.hidden = true; imgEl.removeAttribute("src"); }
+
     const equip = armory.ArmoryEquipment || [];
     document.getElementById("charEquipRows").innerHTML = equip.map(it=>{
       const gradeCls = GRADE_CLASS[it.Grade] || "";
       return `<tr><td>${escapeHtml(it.Type)}</td><td style="text-align:left">${escapeHtml(stripTags(it.Name))}</td><td class="${gradeCls}">${escapeHtml(it.Grade||"-")}</td></tr>`;
     }).join("") || `<tr><td colspan="3">장비 정보 없음</td></tr>`;
 
+    const bracelet = equip.find(it=>it.Type==="팔찌");
+    const braceletBox = document.getElementById("charBraceletInfo");
+    if(bracelet){
+      const lines = [
+        ...htmlToLines(findTooltipSection(bracelet.Tooltip, "팔찌 효과")),
+        ...htmlToLines(findTooltipSection(bracelet.Tooltip, "아크 패시브 포인트 효과"))
+      ];
+      braceletBox.innerHTML = lines.length
+        ? lines.map(l=>`<div>${escapeHtml(l)}</div>`).join("")
+        : `<div style="color:var(--dim)">팔찌 효과 정보 없음</div>`;
+    }else{
+      braceletBox.innerHTML = `<div style="color:var(--dim)">착용 중인 팔찌 없음</div>`;
+    }
+
+    const gems = (armory.ArmoryGem && armory.ArmoryGem.Gems) || [];
+    document.getElementById("charGemRows").innerHTML = gems.map(g=>{
+      const gradeCls = GRADE_CLASS[g.Grade] || "";
+      return `<tr><td>${g.Slot ?? "-"}</td><td style="text-align:left">${escapeHtml(stripTags(g.Name))}</td><td class="${gradeCls}">${escapeHtml(g.Grade||"-")}</td><td>Lv.${g.Level ?? "-"}</td></tr>`;
+    }).join("") || `<tr><td colspan="4">보석 정보 없음</td></tr>`;
+    const gemEffects = armory.ArmoryGem && armory.ArmoryGem.Effects;
+    document.getElementById("charGemSummary").textContent = gemEffects && gemEffects.Description ? stripTags(gemEffects.Description) : "";
+
     const effects = (armory.ArmoryEngraving && armory.ArmoryEngraving.ArkPassiveEffects) || [];
     document.getElementById("charEngraveRows").innerHTML = effects.map(ef=>{
       const gradeCls = GRADE_CLASS[ef.Grade] || "";
       return `<tr><td style="text-align:left">${escapeHtml(ef.Name)}</td><td class="${gradeCls}">${escapeHtml(ef.Grade||"-")}</td><td>Lv.${ef.Level ?? "-"}</td></tr>`;
     }).join("") || `<tr><td colspan="3">각인 정보 없음</td></tr>`;
+
+    const arkEffects = (armory.ArkGrid && armory.ArkGrid.Effects) || [];
+    document.getElementById("charArkGridRows").innerHTML = arkEffects.map(ef=>
+      `<tr><td style="text-align:left">${escapeHtml(ef.Name)}</td><td>Lv.${ef.Level ?? "-"}</td><td style="text-align:left">${escapeHtml(stripTags(ef.Tooltip))}</td></tr>`
+    ).join("") || `<tr><td colspan="3">아크 그리드 정보 없음</td></tr>`;
 
     const sorted = [...siblings].sort((a,b)=> parseNum(b.ItemAvgLevel) - parseNum(a.ItemAvgLevel));
     document.getElementById("charSiblingRows").innerHTML = sorted.map(s=>

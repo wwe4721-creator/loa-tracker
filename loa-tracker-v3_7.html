@@ -459,12 +459,12 @@
     fetchBtn.disabled = true; copyBtn.disabled = true;
     setStatus("시세 조회 중…");
     let ok=0, fail=0; const failNames=[];
-    for(let i=0;i<rows.length;i++){
+    // 품목을 순서대로 하나씩이 아니라 한꺼번에(동시에) 요청해서 전체 대기 시간을 줄임
+    await Promise.all(rows.map(async (_, i)=>{
       await fetchRow(i);
       if(rows[i].status==="성공") ok++; else { fail++; failNames.push(rows[i].name+"("+rows[i].status+")"); }
       renderAssets();
-      await new Promise(r=>setTimeout(r,200)); // 호출 제한 보호
-    }
+    }));
     fetchBtn.disabled = false; copyBtn.disabled = false;
     if(fail===0){
       setStatus(`시세 최신화 완료 — ${ok}개 품목 반영 (${new Date().toLocaleString("ko-KR")})`, "ok");
@@ -659,6 +659,7 @@
   window.addEventListener("scroll", ()=>{ if(acActiveInput) acHide(); }, true);
 
   renderAssets();
+  fetchAllPrices(); // 페이지를 열면 버튼을 안 눌러도 현재 시점 가격을 자동으로 최신화
 })();
 </script>
 </body>

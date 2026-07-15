@@ -150,6 +150,25 @@
   .sibling-link{color:var(--ink);text-decoration:none;font-weight:600}
   .sibling-link:hover{color:var(--gold);text-decoration:underline}
 
+  /* 전투정보실 스타일 장비 카드 */
+  .eq-card{display:flex;gap:10px;padding:5px 2px;align-items:flex-start;border-radius:6px}
+  .eq-card:hover{background:rgba(215,169,75,.06)}
+  .eq-icon{position:relative;width:46px;flex-shrink:0;border-radius:6px;padding:3px}
+  .eq-icon img{width:40px;height:40px;display:block;border-radius:4px}
+  .eq-q{display:block;text-align:center;font-size:10px;font-weight:700;color:#fff;border-radius:3px;margin-top:3px;line-height:1.5}
+  .eq-body{min-width:0;flex:1}
+  .eq-sub{color:var(--dim);font-size:11px;margin-bottom:1px}
+  .eq-name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .opt-line{font-size:11.5px;padding:1.5px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .opt-b{display:inline-block;min-width:17px;text-align:center;font-size:10px;font-weight:700;border-radius:3px;margin-right:5px;line-height:1.6;padding:0 2px}
+  .opt-b.상{background:#7a4c0e;color:#ffc266}
+  .opt-b.중{background:#4a2266;color:#d9a6ff}
+  .opt-b.하{background:#123a5e;color:#7cc0ff}
+  .eng-badge{display:inline-block;font-size:11px;border-radius:4px;padding:1px 6px;margin:2px 4px 0 0;background:var(--panel2);border:1px solid var(--line)}
+  .eng-badge b{color:var(--gold)}
+  .eng-badge.debuff{color:#e0615f}
+  .eng-badge.debuff b{color:#e0615f}
+
   @media (max-width:900px){
     body{font-size:13px}
     .summary{grid-template-columns:repeat(2,1fr)}
@@ -272,11 +291,15 @@
         <div class="card" style="grid-row:1;grid-column:4"><div class="label">길드</div><div class="value" id="charGuild">-</div></div>
 
         <img id="charImage" hidden alt="캐릭터 이미지" class="char-portrait" style="grid-row:2;grid-column:1">
-        <div class="char-panel" style="grid-row:2;grid-column:2/4">
+        <div class="char-panel" style="grid-row:2;grid-column:2">
           <div class="section-title" style="margin-top:0">장비</div>
-          <div class="icon-grid" id="charEquipRows"></div>
+          <div id="charEquipRows"></div>
         </div>
-        <div class="char-panel" style="grid-row:2;grid-column:4/5">
+        <div class="char-panel" style="grid-row:2;grid-column:3">
+          <div class="section-title" style="margin-top:0">악세사리</div>
+          <div id="charAccRows"></div>
+        </div>
+        <div class="char-panel" style="grid-row:2;grid-column:4">
           <div class="section-title" style="margin-top:0">팔찌 효과</div>
           <div id="charBraceletInfo" class="text-list"></div>
           <div class="section-title">각인 (아크 패시브)</div>
@@ -819,6 +842,61 @@
     });
     return lines.filter(Boolean).join("\n");
   }
+  // Tooltip에서 품질/아이템레벨/티어 추출 (ItemTitle 블록의 qualityValue, leftStr2 파싱)
+  function parseEquipMeta(tooltipStr){
+    const meta = {quality:-1, itemLevel:null, tier:null};
+    if(!tooltipStr) return meta;
+    let tt;
+    try{ tt = JSON.parse(tooltipStr); }catch(e){ return meta; }
+    const t1 = (tt.Element_001 && tt.Element_001.value) || {};
+    if(typeof t1.qualityValue === "number") meta.quality = t1.qualityValue;
+    const lvlStr = stripTags(t1.leftStr2||"");
+    const lm = lvlStr.match(/아이템 레벨 (\d+)/); if(lm) meta.itemLevel = lm[1];
+    const tm = lvlStr.match(/티어 (\d+)/); if(tm) meta.tier = tm[1];
+    return meta;
+  }
+  // 악세서리 연마 효과: 각 줄의 수치 색상이 옵션 등급을 나타냄 (주황=상, 보라=중, 파랑=하)
+  function parsePolishEffects(tooltipStr){
+    const html = findTooltipSection(tooltipStr, "연마 효과");
+    if(!html) return [];
+    const TIER_BY_COLOR = {"FE9600":"상","CE43FC":"중","00B5FF":"하"};
+    return String(html).split(/<br\s*\/?>/i).map(seg=>{
+      const text = stripTags(seg);
+      if(!text) return null;
+      const cm = seg.match(/<FONT[^>]*COLOR=['"]?#?([0-9A-Fa-f]{6})/i);
+      const tier = cm ? TIER_BY_COLOR[cm[1].toUpperCase()] || null : null;
+      return {text, tier};
+    }).filter(Boolean);
+  }
+  // 어빌리티 스톤 세공 각인: Tooltip 원문에서 [각인명] Lv.N 패턴을 추출 (붉은색은 감소 각인)
+  function parseStoneEngravings(tooltipStr){
+    if(!tooltipStr) return [];
+    const out = [];
+    const re = /\[<FONT COLOR='#([0-9A-Fa-f]{6})'>([^<]+)<\/FONT>\][^L]*Lv\.(\d+)/g;
+    let m;
+    while((m = re.exec(tooltipStr)) !== null){
+      out.push({name:m[2], level:m[3], debuff:m[1].toUpperCase().startsWith("FE")});
+    }
+    return out;
+  }
+  // 품질 수치별 색상 (전투정보실과 동일한 구간: 100 주황 / 90+ 보라 / 70+ 파랑 / 30+ 초록 / 10+ 노랑 / 그 밑 빨강)
+  function qualityColor(q){
+    if(q>=100) return "#e08a1e";
+    if(q>=90) return "#a94dc9";
+    if(q>=70) return "#3d7dd2";
+    if(q>=30) return "#4fae3f";
+    if(q>=10) return "#c9a52c";
+    return "#c0392b";
+  }
+  const GRADE_BG = {
+    "고대":"linear-gradient(135deg,#3a2c14,#a58b4a)",
+    "유물":"linear-gradient(135deg,#341a09,#a24006)",
+    "전설":"linear-gradient(135deg,#362003,#9e5f04)",
+    "영웅":"linear-gradient(135deg,#2e0a3d,#7a2baa)",
+    "희귀":"linear-gradient(135deg,#0a2438,#2e5f8a)",
+    "고급":"linear-gradient(135deg,#0f2e0f,#3f7a2b)",
+    "에스더":"linear-gradient(135deg,#0d3330,#2ba39a)"
+  };
 
   async function searchCharacter(){
     const nameInput = document.getElementById("charNameInput");
@@ -866,12 +944,60 @@
         + `<span class="name">${nameHtml}</span>${extraHtml||""}</div>`;
     }
 
-    const equip = armory.ArmoryEquipment || [];
-    document.getElementById("charEquipRows").innerHTML = equip.map(it=>{
-      const gradeCls = GRADE_CLASS[it.Grade] || "";
+    // 전투정보실 스타일 카드: 등급색 배경 아이콘 + 품질 배지 + 요약 텍스트, 상세는 title(마우스 오버)
+    function eqCard(it, bodyHtml){
+      const meta = parseEquipMeta(it.Tooltip);
+      const bg = GRADE_BG[it.Grade] || "var(--field)";
+      const qBadge = meta.quality >= 0
+        ? `<span class="eq-q" style="background:${qualityColor(meta.quality)}">${meta.quality}</span>` : "";
       const title = stripTags(it.Name)+"\n\n"+buildTooltipText(it.Tooltip);
-      return iconRow(it.Icon, `<span class="${gradeCls}">${escapeHtml(stripTags(it.Name))}</span>`, "", title);
-    }).join("") || `<div style="color:var(--dim)">장비 정보 없음</div>`;
+      return `<div class="eq-card" title="${escapeHtml(title)}">`
+        + `<div class="eq-icon" style="background:${bg}"><img src="${escapeHtml(it.Icon||"")}">${qBadge}</div>`
+        + `<div class="eq-body">${bodyHtml}</div></div>`;
+    }
+
+    const equip = armory.ArmoryEquipment || [];
+    const GEAR_TYPES = ["무기","투구","상의","하의","장갑","어깨"];
+    const ACC_TYPES = ["목걸이","귀걸이","반지"];
+
+    // 왼쪽: 방어구/무기 — "아이템레벨·티어 / 부위 +강화" 요약
+    const gearHtml = equip.filter(it=>GEAR_TYPES.includes(it.Type)).map(it=>{
+      const meta = parseEquipMeta(it.Tooltip);
+      const gradeCls = GRADE_CLASS[it.Grade] || "";
+      const rm = stripTags(it.Name).match(/^\+(\d+)/);
+      const sub = [meta.itemLevel, meta.tier ? "T"+meta.tier : null].filter(Boolean).join(" · ");
+      return eqCard(it,
+        `<div class="eq-sub">${escapeHtml(sub || it.Grade || "")}</div>`
+        + `<div class="eq-name ${gradeCls}">${escapeHtml(it.Type)}${rm ? " +"+rm[1] : ""}</div>`);
+    }).join("");
+    // 나침반/부적/보주 등 기타 장비는 이름만 간단히
+    const etcHtml = equip.filter(it=>!GEAR_TYPES.includes(it.Type) && !ACC_TYPES.includes(it.Type) && it.Type!=="어빌리티 스톤" && it.Type!=="팔찌").map(it=>{
+      const gradeCls = GRADE_CLASS[it.Grade] || "";
+      return eqCard(it,
+        `<div class="eq-sub">${escapeHtml(it.Type)}</div>`
+        + `<div class="eq-name ${gradeCls}">${escapeHtml(stripTags(it.Name))}</div>`);
+    }).join("");
+    document.getElementById("charEquipRows").innerHTML = (gearHtml + etcHtml) || `<div style="color:var(--dim)">장비 정보 없음</div>`;
+
+    // 오른쪽: 악세서리 — 연마 효과를 상/중/하 배지로 표시
+    const accHtml = equip.filter(it=>ACC_TYPES.includes(it.Type)).map(it=>{
+      const opts = parsePolishEffects(it.Tooltip);
+      const optHtml = opts.map(o=>
+        `<div class="opt-line">${o.tier ? `<span class="opt-b ${o.tier}">${o.tier}</span>` : ""}${escapeHtml(o.text)}</div>`
+      ).join("");
+      return eqCard(it, optHtml || `<div class="eq-name">${escapeHtml(stripTags(it.Name))}</div>`);
+    }).join("");
+    // 어빌리티 스톤 — 세공 각인 배지
+    const stone = equip.find(it=>it.Type==="어빌리티 스톤");
+    let stoneHtml = "";
+    if(stone){
+      const engs = parseStoneEngravings(stone.Tooltip);
+      const gradeCls = GRADE_CLASS[stone.Grade] || "";
+      stoneHtml = eqCard(stone,
+        `<div class="eq-name ${gradeCls}">${escapeHtml(stripTags(stone.Name))}</div>`
+        + `<div>${engs.map(e=>`<span class="eng-badge${e.debuff?" debuff":""}">${escapeHtml(e.name)} <b>${e.level}</b></span>`).join("")}</div>`);
+    }
+    document.getElementById("charAccRows").innerHTML = (accHtml + stoneHtml) || `<div style="color:var(--dim)">악세서리 정보 없음</div>`;
 
     const bracelet = equip.find(it=>it.Type==="팔찌");
     const braceletBox = document.getElementById("charBraceletInfo");

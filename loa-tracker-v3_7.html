@@ -33,6 +33,7 @@
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
 
   .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  .summary.cols5{grid-template-columns:repeat(5,1fr)}
   .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:13px 16px}
   .card .label{color:var(--dim);font-size:11.5px;margin-bottom:6px}
   .card .value{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
@@ -171,7 +172,7 @@
 
   @media (max-width:900px){
     body{font-size:13px}
-    .summary{grid-template-columns:repeat(2,1fr)}
+    .summary, .summary.cols5{grid-template-columns:repeat(2,1fr)}
     .char-grid{grid-template-columns:1fr}
     .char-grid>*{grid-column:1!important}
     .panel{overflow-x:auto}
@@ -191,11 +192,12 @@
   </div>
 
   <div class="tab-panel" data-tab="asset">
-  <div class="summary">
+  <div class="summary cols5">
     <div class="card"><div class="label">기준 총자산</div><div class="value gold" id="totalBase">0</div></div>
     <div class="card"><div class="label">현재 총자산</div><div class="value gold" id="totalNow">0</div></div>
     <div class="card"><div class="label">차이</div><div class="value" id="totalDiff">0</div></div>
     <div class="card"><div class="label">변동률</div><div class="value" id="totalRate">-</div></div>
+    <div class="card"><div class="label">더 모은 재료 가치</div><div class="value" id="gatherValue">-</div></div>
   </div>
 
   <div class="panel">
@@ -206,21 +208,22 @@
           <th colspan="3" class="group">기준 시점</th>
           <th></th>
           <th colspan="3" class="group divider-col">현재 시점</th>
-          <th colspan="3" class="group divider-col">비교</th>
+          <th colspan="4" class="group divider-col">비교</th>
           <th></th>
         </tr>
         <tr>
           <th style="width:150px">품목</th>
-          <th style="width:105px">수량</th>
-          <th style="width:105px">가격</th>
-          <th style="width:105px">합계</th>
+          <th style="width:100px">수량</th>
+          <th style="width:100px">가격</th>
+          <th style="width:100px">합계</th>
           <th style="width:44px"></th>
-          <th style="width:105px" class="divider-col">수량</th>
-          <th style="width:105px">가격</th>
-          <th style="width:105px">합계</th>
-          <th style="width:115px" class="divider-col">차이</th>
-          <th style="width:85px">변동률</th>
-          <th style="width:85px">손해 비중</th>
+          <th style="width:100px" class="divider-col">수량</th>
+          <th style="width:100px">가격</th>
+          <th style="width:100px">합계</th>
+          <th style="width:90px" class="divider-col">수량 차이</th>
+          <th style="width:110px">금액 차이</th>
+          <th style="width:80px">변동률</th>
+          <th style="width:80px">손해 비중</th>
           <th style="width:44px"></th>
         </tr>
       </thead>
@@ -407,7 +410,12 @@
   function rowCalc(r){
     const base = parseNum(r.bq)*parseNum(r.bp);
     const now  = parseNum(r.nq)*parseNum(r.np);
-    return {base, now, diff:now-base, rate: base!==0 ? (now-base)/base*100 : null};
+    // qdiff: 현재 수량 − 기준 수량 (현재 수량을 아직 안 적은 행은 null → "-" 표시)
+    const qdiff = String(r.nq).trim()==="" ? null : parseNum(r.nq)-parseNum(r.bq);
+    return {base, now, diff:now-base, rate: base!==0 ? (now-base)/base*100 : null, qdiff};
+  }
+  function qdiffCell(c){
+    return c.qdiff===null ? "-" : (c.qdiff>0?"+":"")+fmt(c.qdiff);
   }
   function cls(v){return v>0?"up":v<0?"down":"flat"}
   function signed(v){return (v>0?"+":"")+fmt(Math.round(v))}
@@ -434,7 +442,8 @@
         <td class="divider-col"><input type="text" inputmode="decimal" data-i="${i}" data-k="nq" value="${escapeHtml(r.nq)}" placeholder="0"></td>
         <td><input type="text" inputmode="decimal" data-i="${i}" data-k="np" value="${escapeHtml(r.np)}" placeholder="0"></td>
         <td class="sum">${fmt(Math.round(c.now))}</td>
-        <td class="diff divider-col ${cls(c.diff)}">${arrow(c.diff)}${signed(c.diff)}</td>
+        <td class="diff divider-col ${cls(c.qdiff??0)}">${qdiffCell(c)}</td>
+        <td class="diff ${cls(c.diff)}">${arrow(c.diff)}${signed(c.diff)}</td>
         <td class="rate ${cls(c.diff)}">${c.rate===null?"-":(c.rate>0?"+":"")+c.rate.toFixed(2)+"%"}</td>
         <td class="rate flat">-</td>
         <td><button class="del-btn" data-del="${i}" title="행 삭제">×</button></td>
@@ -448,17 +457,19 @@
     const c = rowCalc(rows[i]); const tds = tr.children;
     tds[3].textContent = fmt(Math.round(c.base));
     tds[7].textContent = fmt(Math.round(c.now));
-    tds[8].textContent = arrow(c.diff)+signed(c.diff);
-    tds[8].className = "diff divider-col "+cls(c.diff);
-    tds[9].textContent = c.rate===null?"-":(c.rate>0?"+":"")+c.rate.toFixed(2)+"%";
-    tds[9].className = "rate "+cls(c.diff);
+    tds[8].textContent = qdiffCell(c);
+    tds[8].className = "diff divider-col "+cls(c.qdiff??0);
+    tds[9].textContent = arrow(c.diff)+signed(c.diff);
+    tds[9].className = "diff "+cls(c.diff);
+    tds[10].textContent = c.rate===null?"-":(c.rate>0?"+":"")+c.rate.toFixed(2)+"%";
+    tds[10].className = "rate "+cls(c.diff);
   }
   function refreshLossShares(){
     let totalLoss = 0;
     const diffs = rows.map(r=>{ const c=rowCalc(r); if(c.diff<0) totalLoss += Math.abs(c.diff); return c.diff; });
     rows.forEach((r,i)=>{
       const tr = assetBody.children[i]; if(!tr) return;
-      const td = tr.children[10]; if(!td) return;
+      const td = tr.children[11]; if(!td) return;
       const d = diffs[i];
       if(d<0 && totalLoss>0){
         td.textContent = (Math.abs(d)/totalLoss*100).toFixed(1)+"%";
@@ -505,6 +516,22 @@
       rEl.textContent = (rate>0?"+":"")+rate.toFixed(2)+"%";
       rEl.className = "value "+cls(diff);
     }else{ rEl.textContent="-"; rEl.className="value flat"; }
+
+    // 더 모은 재료 가치: Σ (현재수량−기준수량) × 단가 (현재가가 있으면 현재가, 없으면 기준가로 계산)
+    let gather = 0, hasQdiff = false;
+    rows.forEach(r=>{
+      const c = rowCalc(r);
+      if(c.qdiff===null) return;
+      hasQdiff = true;
+      const unit = parseNum(r.np) || parseNum(r.bp);
+      gather += c.qdiff * unit;
+    });
+    const gEl = document.getElementById("gatherValue");
+    if(hasQdiff){
+      gEl.textContent = arrow(gather)+signed(gather);
+      gEl.className = "value "+cls(gather);
+    }else{ gEl.textContent="-"; gEl.className="value flat"; }
+
     const totalLoss = refreshLossShares();
     updateWorstLoss(totalLoss);
   }
